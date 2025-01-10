@@ -1,0 +1,180 @@
+<html>
+  <head>
+    <style>
+        body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        }
+        * {
+          
+        margin-top: 10px;
+        }
+</style>
+    <!--script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.7/dist/umd/ffmpeg.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/util/dist/umd/index.js"></script-->
+    <script src="ffmpeg.js"></script>
+    <script src="index.js"></script>
+  </head>
+
+  <body>
+    <h3>Wiggle Photos</h3>
+    <div id="inner"></div>
+    <label for="loops">Wiggle loops:</label>
+    <input type="number" id="loops" value="4">
+    <label for="FPS">FPS:</label>
+    <input type="number" id="FPS" value="6">
+    <button onclick="transcode()" style="width:20vw;height:3em;font-size: 50; background-color: rgb(243, 138, 159);border-radius: 20px;">📷</button>
+    <p id="message"></p>
+    <input type="checkbox" id="viewlogs">
+    <ol id="logs">
+
+    <script>viewlogs.onchange=function(){logs.style.display = viewlogs.checked ? "block" : "none"}</script>
+
+    <script>
+      const { fetchFile } = FFmpegUtil;
+      const { FFmpeg } = FFmpegWASM;
+      let ffmpeg = null;
+
+      imgURLs = ["http://wiggle0.local/capture", "http://wiggle1.local/capture", "http://wiggle2.local/capture", "http://wiggle3.local/capture"]
+      //imgURLs = ["img00.jpg", "img01.jpg", "img02.jpg", "img03.jpg"]
+
+      async function getFileAsBlob(url, type) {
+        const response = await fetch(url);
+        
+        // Check if the request was successful
+        if (!response.ok) {
+            throw new Error(`${url} HTTP error! Status: ${response.status}`);
+        }
+        
+        const blob = await response.blob();
+        blob.type = type;
+        console.log(url, "downloaded as ", type)
+        return blob;
+    }
+
+      const transcode = async () => {
+        try{
+        fps = document.getElementById("FPS").value;
+        loops = document.getElementById("loops").value;
+        const message = document.getElementById("message");
+        if (ffmpeg === null) {
+          ffmpeg = new FFmpeg();
+          ffmpeg.on("log", ({ message }) => {
+            console.log(message);
+          })
+          ffmpeg.on("progress", ({ progress, time }) => {
+	          message.innerHTML = `${time / 1000000} s`;
+          });
+          const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd';
+	        //const coreURL = getFileAsBlob(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
+	        //const wasmURL = getFileAsBlob(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
+          //await ffmpeg.load({ coreURL: coreURL, wasmURL: wasmURL });
+          await ffmpeg.load({coreURL: `${baseURL}/ffmpeg-core.js`});
+        }
+        message.innerHTML = "Start Concating";
+        awaits = []
+        for (const url of imgURLs) {
+          awaits.push(getFileAsBlob(url, 'image/jpeg'))
+        }
+        singleLoop = [];
+        for (var i=0; i<imgURLs.length; i++) {
+          const name = "img"+i+".jpg";
+          ffmpeg.writeFile(name, await fetchFile(await awaits[i]));
+          singleLoop.push(`file ${name}`);
+        }
+
+        for(var i=singleLoop.length-2; i>0; i--) {
+          singleLoop.push(singleLoop[i])
+        }
+
+        inputPaths = []
+        for(var i=0;i<loops; i++) inputPaths = inputPaths.concat(singleLoop)
+
+        console.log("inputs: ",inputPaths.join('\n'))
+        await ffmpeg.writeFile('concat_list.txt', inputPaths.join('\n'));
+        await ffmpeg.exec(['-r', fps, '-f', 'concat', '-i', 'concat_list.txt','-r', fps,"-c:v", "libx264", "-pix_fmt", "yuv420p", 'output.mp4']);
+        message.innerHTML = "Complete Concating";
+        const data = await ffmpeg.readFile('output.mp4');
+        /*const video = document.getElementById("output-video");
+        video.src = URL.createObjectURL(
+          new Blob([data.buffer], {
+            type: "video/mp4"
+          })
+        );
+        video.play();
+        document.getElementById("download").download = "wiggle.mp4";
+        document.getElementById("download").href = video.src;*/
+        PostBlob(new Blob([data.buffer], { type: 'video/mp4' }))
+        }
+        catch(e) {
+          console.log(e)
+        }
+      };
+
+      function PostBlob(blob) {
+                    var video = document.createElement('video');
+                    video.controls = false;
+                    video.autoplay = true;
+                    video.loop = true;
+                    video.playsInline = true;
+
+                    var source = document.createElement('source');
+                    source.src = URL.createObjectURL(blob);
+                    source.type = 'video/mp4; codecs=mpeg4';
+                    video.src = source.src;
+
+                    video.download = 'Wiggle.mp4';
+
+                    video.tabIndex = 0;
+                    video.focus();
+                    video.play();
+                    inner.appendChild(video);
+
+                    inner.appendChild(document.createElement('hr'));
+                    var h2 = document.createElement('h2');
+                    h2.innerHTML = '<a href="' + source.src + '" target="_blank" download="Wiggle.mp4" style="font-size:200%;color:blue;">Download</a>';
+                    h2.style.display = 'block';
+                    inner.appendChild(h2);
+                    video.scrollIntoView({ behavior: "smooth", block: "end", inline: "nearest" })
+                }
+
+
+
+      var logsPreview = document.getElementById('logs');
+
+      function log(message) {
+          var li = document.createElement('li');
+          li.innerHTML = message;
+          logsPreview.appendChild(li);
+
+          li.tabIndex = 0;
+          li.focus();
+      }
+
+      window.onerror = (event, source, lineno, colno, error) => {console.log(event, source, lineno, colno,error)};
+      (function custom_console_with_traces(){
+      var console = window.console
+      if (!console) return
+      function intercept(method){
+          var original = console[method]
+          console[method] = function(){
+              var message = Array.prototype.slice.apply(arguments).join(' ')
+              //create an Error and get its stack trace and format it
+              //var stackTrace = stack_trace_format(new Error().stack);
+
+              log(message)
+              //log(new Error().stack)
+
+              //make sure we still call the original method
+              original.call(console, message)
+          }
+      }
+      //intercept all methods including trace
+      var methods = ['log', 'warn', 'error', 'trace']
+      for (var i = 0; i < methods.length; i++)
+          intercept(methods[i])
+      })();
+    </script>
+  </body>
+</html>

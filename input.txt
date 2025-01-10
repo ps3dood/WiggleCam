@@ -1,0 +1,3 @@
+file 'img00.jpg'
+file 'img01.jpg'
+file 'img02.jpg'

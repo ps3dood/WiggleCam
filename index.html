@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+        <style>
+            video {
+                display: block;
+                margin: 0 auto;
+                width: 90vw;
+            }
+
+            li {
+                border-bottom: 1px solid rgb(189, 189, 189);
+                border-left: 1px solid rgb(189, 189, 189);
+                padding: .5em;
+            }
+        </style>
+    </head>
+
+    <body>
+        <article>
+            <section class="experiment">
+                <div class="inner">
+                    <button id="stop-recording-video">Capture</button>
+                </div>
+            </section>
+            <section class="experiment">
+                <h2 class="header">Logs</h2>
+                <ol id="logs-preview">
+                </ol>
+            </section>
+            <script>
+                var inner = document.querySelector('.inner');
+
+                document.querySelector('#stop-recording-video').onclick = function() {
+                    convertStreams();
+                };
+
+                var workerPath = 'https://archive.org/download/ffmpeg_asm/ffmpeg_asm.js';
+                //if(document.domain == 'localhost') {
+                    workerPath = location.href.replace(location.href.split('/').pop(), '') + 'ffmpeg_asm.js';
+                //}
+
+                function processInWebWorker() {
+                    var blob = URL.createObjectURL(new Blob(['importScripts("' + workerPath + '");var now = Date.now;function print(text) {postMessage({"type" : "stdout","data" : text});};onmessage = function(event) {var message = event.data;if (message.type === "command") {var Module = {print: print,printErr: print,files: message.files || [],arguments: message.arguments || [],TOTAL_MEMORY: 100000000 || false};postMessage({"type" : "start","data" : Module.arguments.join(" ")});postMessage({"type" : "stdout","data" : "Received command: " +Module.arguments.join(" ") +((Module.TOTAL_MEMORY) ? ".  Processing with " + Module.TOTAL_MEMORY + " bits." : "")});var time = now();var result = ffmpeg_run(Module);var totalTime = now() - time;postMessage({"type" : "stdout","data" : "Finished processing (took " + totalTime + "ms)"});postMessage({"type" : "done","data" : result,"time" : totalTime});}};postMessage({"type" : "ready"});'], {
+                        type: 'application/javascript'
+                    }));
+
+                    var worker = new Worker(blob);
+                    URL.revokeObjectURL(blob);
+                    return worker;
+                }
+
+                var worker;
+
+                function convertStreams() {
+                    var aab0;
+                    var aab1;
+                    var aab2;
+                    var buffersReady;
+                    var workerReady;
+                    var posted;
+
+                    var fileReader0 = new FileReader();
+                    fileReader0.onload = function() {
+                        aab0 = this.result;
+                        console.log("aab0");
+                        if(aab0 && aab1 && aab2){
+                            console.log("postMessage");
+                            postMessage();
+                        }
+                    };
+                    var fileReader1 = new FileReader();
+                    fileReader1.onload = function() {
+                        aab1 = this.result;
+                        console.log("aab1");
+                        if(aab0 && aab1 && aab2){
+                            console.log("postMessage");
+                            postMessage();
+                        }
+                    };
+                    var fileReader2 = new FileReader();
+                    fileReader2.onload = function() {
+                        aab2 = this.result;
+                        console.log("aab2");
+                        if(aab0 && aab1 && aab2){
+                            console.log("postMessage");
+                            postMessage();
+                        }
+                    };
+                    
+                    var f0 = fetch('http://172.20.10.3/capture')
+                    .then(response => response.blob())
+                    .then(blob => {
+                        fileReader0.readAsArrayBuffer(blob);
+                    });
+                    
+                    var f1 = fetch('http://172.20.10.3/capture')
+                    .then(response => response.blob())
+                    .then(blob => {
+                        fileReader1.readAsArrayBuffer(blob);
+                    });
+                    
+                    var f2 = fetch('http://172.20.10.2/capture')
+                    .then(response => response.blob())
+                    .then(blob => {
+                        fileReader2.readAsArrayBuffer(blob);
+                    })
+
+                    if (!worker) {
+                        worker = processInWebWorker();
+                    }
+
+                    worker.onmessage = function(event) {
+                        var message = event.data;
+                        if (message.type == "ready") {
+                            log(workerPath +'" has been loaded.');
+
+                            workerReady = true;
+                            if (buffersReady)
+                                postMessage();
+                        } else if (message.type == "stdout") {
+                            log(message.data);
+                        } else if (message.type == "start") {
+                            log(workerPath +' received ffmpeg command.');
+                        } else if (message.type == "done") {
+                            log(JSON.stringify(message));
+
+                            var result = message.data[0];
+                            log(JSON.stringify(result));
+
+                            var blob = new File([result.data], 'test.mp4', {
+                                type: 'video/mp4'
+                            });
+
+                            log(JSON.stringify(blob));
+
+                            PostBlob(blob);
+                        }
+                    };
+                    var postMessage = function() {
+                        posted = true;
+
+                        worker.postMessage({
+                            type: 'command',
+                            arguments: '-f concat -r 1 -i input.txt -r 1 test.mp4'.split(' '),
+                            files: [
+                                {
+                                    data: new Uint8Array(aab0),
+                                    name: 'img00.jpg'
+                                },
+                                {
+                                    data: new Uint8Array(aab1),
+                                    name: 'img01.jpg'
+                                },
+                                {
+                                    data: new Uint8Array(aab2),
+                                    name: 'img02.jpg'
+                                },
+                                {
+                                    data: (new TextEncoder()).encode("file 'img00.jpg'\nfile 'img01.jpg'\nfile 'img02.jpg'\nfile 'img01.jpg'"),
+                                    name: 'input.txt'
+                                }
+                            ]
+                        });
+                    };
+                
+                }
+
+                function PostBlob(blob) {
+                    var video = document.createElement('video');
+                    video.controls = false;
+                    video.autoplay = true;
+                    video.loop = true;
+                    video.playsInline = true;
+
+                    var source = document.createElement('source');
+                    source.src = URL.createObjectURL(blob);
+                    source.type = 'video/mp4; codecs=mpeg4';
+                    video.appendChild(source);
+
+                    video.download = 'Play mp4 in VLC Player.mp4';
+
+                    inner.appendChild(document.createElement('hr'));
+                    var h2 = document.createElement('h2');
+                    h2.innerHTML = '<a href="' + source.src + '" target="_blank" download="loop.mp4" style="font-size:200%;color:red;">Download</a>';
+                    inner.appendChild(h2);
+                    h2.style.display = 'block';
+                    inner.appendChild(video);
+
+                    video.tabIndex = 0;
+                    video.focus();
+                    video.play();
+                }
+
+                var logsPreview = document.getElementById('logs-preview');
+
+                function log(message) {
+                    var li = document.createElement('li');
+                    li.innerHTML = message;
+                    logsPreview.appendChild(li);
+
+                    li.tabIndex = 0;
+                    li.focus();
+                }
+
+                window.onerror = (event, source, lineno, colno, error) => {console.log(event, source, lineno, colno,error)};
+                (function custom_console_with_traces(){
+                var console = window.console
+                if (!console) return
+                function intercept(method){
+                    var original = console[method]
+                    console[method] = function(){
+                        var message = Array.prototype.slice.apply(arguments).join(' ')
+                        //create an Error and get its stack trace and format it
+                        //var stackTrace = stack_trace_format(new Error().stack);
+
+                        log(message)
+                        //log(new Error().stack)
+
+                        //make sure we still call the original method
+                        original.call(console, message)
+                    }
+                }
+                //intercept all methods including trace
+                var methods = ['log', 'warn', 'error', 'trace']
+                for (var i = 0; i < methods.length; i++)
+                    intercept(methods[i])
+            })();
+            </script>
+
+        </article>
+
+
+        <!-- commits.js is useless for you! -->
+        <script>
+            window.useThisGithubPath = 'muaz-khan/Ffmpeg.js';
+        </script>
+        <script src="https://cdn.webrtc-experiment.com/commits.js" async> </script>
+    </body>
+</html>
