@@ -1,16 +1,20 @@
 <html>
   <head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1, minimum-scale=1, user-scalable=no" name="viewport">
     <style>
-        body {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        }
-        * {
-          
-        margin-top: 10px;
-        }
-</style>
+            body {
+              display:flex;
+              flex-direction:column;
+              
+              min-height:100vh;
+              background-color: rgb(81, 153, 182);
+            }
+            * {
+              
+            margin-top: 10px;
+            }
+    </style>
     <!--script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.7/dist/umd/ffmpeg.js"></script>
     <script src="https://unpkg.com/@ffmpeg/util/dist/umd/index.js"></script-->
     <script src="ffmpeg.js"></script>
@@ -18,16 +22,25 @@
   </head>
 
   <body>
-    <h3>Wiggle Photos</h3>
-    <div id="inner"></div>
-    <label for="loops">Wiggle loops:</label>
-    <input type="number" id="loops" value="4">
-    <label for="FPS">FPS:</label>
-    <input type="number" id="FPS" value="6">
-    <button onclick="transcode()" style="width:20vw;height:3em;font-size: 50; background-color: rgb(243, 138, 159);border-radius: 20px;">📷</button>
+    <h3>Wiggle-Z</h3>
+    <div id="inner" ></div>
+    <label for="loops">How many loops?</label>
+    <input type="number" id="loops" value="2">
+    <br>
+    <label for="FPS">Frames per second?</label>
+    <input type="number" id="FPS" value="1">
+    <br>
+    <br>
+    <label for="slider_exposure">Exposure time</label>
+    <input type="range" id="slider_exposure" min="0" max="1200" value="204" onchange=setExposure>
+    <label for="slider_gain">ISO</label>
+    <input type="range" id="slider_gain" min="0" max="30" value="5" onchange=setGain>
+
+    <img id="stream" src="" crossorigin="">
+    <button onclick="transcode()" style="width:20vw;height:20vw;font-size: 50; background-color: rgb(176, 220, 238);border-radius: 20px;padding:0;border-style: dotted;">📸</button>
     <p id="message"></p>
     <input type="checkbox" id="viewlogs">
-    <ol id="logs">
+    <ol id="logs" style="display: none;">
 
     <script>viewlogs.onchange=function(){logs.style.display = viewlogs.checked ? "block" : "none"}</script>
 
@@ -35,12 +48,51 @@
       const { fetchFile } = FFmpegUtil;
       const { FFmpeg } = FFmpegWASM;
       let ffmpeg = null;
+      
+      //var camURLs = ["http://wiggle0.local", "http://wiggle1.local", "http://wiggle2.local", "http://wiggle3.local"]
+      var camURLs = ["http://wiggle0.local", "http://wiggle1.local", "http://wiggle2.local", "http://wiggle3.local"]
 
-      imgURLs = ["http://wiggle0.local/capture", "http://wiggle1.local/capture", "http://wiggle2.local/capture", "http://wiggle3.local/capture"]
-      //imgURLs = ["img00.jpg", "img01.jpg", "img02.jpg", "img03.jpg"]
+      async function configCameras(){
+          for(const url of camURLs){
+            try{
+            await fetch(url+"/control?var=framesize&val=11"); //720
+            //await fetch(url+"/control?var=framesize&val=13"); // UXGA
+            await fetch(url+"/control?var=quality&val=4");
+
+            await fetch(url+"/control?var=aec&val=0");
+            await fetch(url+"/control?var=aec_value&val=219");
+            slider_exposure.value = 219
+
+            await fetch(url+"/control?var=agc&val=0");
+            await fetch(url+"/control?var=agc_gain&val=5");
+            slider_gain.value = 5
+
+            startStream()
+            }catch(e){
+              console.log(url, "config failed: ", e)
+            }
+          }
+      }
+
+      slider_exposure.onchange = function (e){
+        console.log(e.target.value)
+      }
+      slider_gain.onchange = function(e){
+        console.log(e.target.value)
+      }
+
+      configCameras();
 
       async function getFileAsBlob(url, type) {
-        const response = await fetch(url);
+        console.log("starting", url)
+        return fetch(url)
+        .then((res)=>{
+          return res.blob();
+        }).then((blob)=>{
+          blob.type=type
+          console.log(url, "downloaded")
+          return blob
+        });
         
         // Check if the request was successful
         if (!response.ok) {
@@ -54,6 +106,7 @@
     }
 
       const transcode = async () => {
+        stopStream()
         try{
         fps = document.getElementById("FPS").value;
         loops = document.getElementById("loops").value;
@@ -66,7 +119,7 @@
           ffmpeg.on("progress", ({ progress, time }) => {
 	          message.innerHTML = `${time / 1000000} s`;
           });
-          const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd';
+          const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd';
 	        //const coreURL = getFileAsBlob(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
 	        //const wasmURL = getFileAsBlob(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
           //await ffmpeg.load({ coreURL: coreURL, wasmURL: wasmURL });
@@ -74,14 +127,22 @@
         }
         message.innerHTML = "Start Concating";
         awaits = []
-        for (const url of imgURLs) {
-          awaits.push(getFileAsBlob(url, 'image/jpeg'))
+        for (const url of camURLs) {
+          awaits.push(getFileAsBlob(url+'/capture', 'image/jpeg'))
         }
         singleLoop = [];
-        for (var i=0; i<imgURLs.length; i++) {
+        for (var i=0; i<camURLs.length; i++) {
           const name = "img"+i+".jpg";
-          ffmpeg.writeFile(name, await fetchFile(await awaits[i]));
+          const filedata = await fetchFile(await awaits[i])
+          ffmpeg.writeFile(name, filedata);
           singleLoop.push(`file ${name}`);
+          console.log(i,name)
+          if(i!=0 && i!=camURLs.length-1){
+            const name = "img"+(camURLs.length-1+camURLs.length-1-i)+".jpg"
+            //singleLoop.push(`file ${name}`);
+            //ffmpeg.writeFile(name, filedata)
+            console.log(i,name)
+          }
         }
 
         for(var i=singleLoop.length-2; i>0; i--) {
@@ -89,11 +150,13 @@
         }
 
         inputPaths = []
-        for(var i=0;i<loops; i++) inputPaths = inputPaths.concat(singleLoop)
+        for(var i=0;i<1; i++) inputPaths = inputPaths.concat(singleLoop)
 
         console.log("inputs: ",inputPaths.join('\n'))
         await ffmpeg.writeFile('concat_list.txt', inputPaths.join('\n'));
-        await ffmpeg.exec(['-r', fps, '-f', 'concat', '-i', 'concat_list.txt','-r', fps,"-c:v", "libx264", "-pix_fmt", "yuv420p", 'output.mp4']);
+        //await ffmpeg.exec(['-r', fps, '-f', 'concat', '-i', 'concat_list.txt','-r', fps,"-c:v", "libx264", "-pix_fmt", "yuv420p", 'output.mp4']);
+        //await ffmpeg.exec(['-r', fps, '-i', 'img%01d.jpg','-filter_complex', 'loop='+(loops-1)+':'+fps*loops*7, '-r', fps,"-c:v", "libx264", "-pix_fmt", "yuv420p", 'output.mp4']);
+        await ffmpeg.exec(['-r', fps, '-f', 'concat', '-i', 'concat_list.txt','-filter_complex', 'loop='+(loops-1)+':'+fps*loops*7, '-r', fps,"-c:v", "libx264", "-pix_fmt", "yuv420p", 'output.mp4']);
         message.innerHTML = "Complete Concating";
         const data = await ffmpeg.readFile('output.mp4');
         /*const video = document.getElementById("output-video");
@@ -106,6 +169,7 @@
         document.getElementById("download").download = "wiggle.mp4";
         document.getElementById("download").href = video.src;*/
         PostBlob(new Blob([data.buffer], { type: 'video/mp4' }))
+        startStream()
         }
         catch(e) {
           console.log(e)
@@ -113,31 +177,44 @@
       };
 
       function PostBlob(blob) {
-                    var video = document.createElement('video');
-                    video.controls = false;
-                    video.autoplay = true;
-                    video.loop = true;
-                    video.playsInline = true;
+          var video = document.createElement('video');
+          video.controls = false;
+          video.autoplay = true;
+          video.loop = true;
+          video.playsInline = true;
 
-                    var source = document.createElement('source');
-                    source.src = URL.createObjectURL(blob);
-                    source.type = 'video/mp4; codecs=mpeg4';
-                    video.src = source.src;
+          video.style.width = "100%"
 
-                    video.download = 'Wiggle.mp4';
+          var source = document.createElement('source');
+          source.src = URL.createObjectURL(blob);
+          source.type = 'video/mp4; codecs=mpeg4';
+          video.src = source.src;
 
-                    video.tabIndex = 0;
-                    video.focus();
-                    video.play();
-                    inner.appendChild(video);
+          video.download = 'Wiggle.mp4';
 
-                    inner.appendChild(document.createElement('hr'));
-                    var h2 = document.createElement('h2');
-                    h2.innerHTML = '<a href="' + source.src + '" target="_blank" download="Wiggle.mp4" style="font-size:200%;color:blue;">Download</a>';
-                    h2.style.display = 'block';
-                    inner.appendChild(h2);
-                    video.scrollIntoView({ behavior: "smooth", block: "end", inline: "nearest" })
-                }
+          video.tabIndex = 0;
+          video.focus();
+          video.play();
+          inner.appendChild(video);
+
+          inner.appendChild(document.createElement('hr'));
+          var h2 = document.createElement('h2');
+          //h2.innerHTML = '<a href="' + source.src + '" target="_blank" download="Wiggle.mp4" style="font-size:200%;color:blue;">Download</a>';
+          h2.innerText = "DownL"
+          video.onclick = function(e){navigator.share({blob})}
+          h2.style.display = 'block';
+          inner.appendChild(h2);
+          video.scrollIntoView({ behavior: "smooth", block: "end", inline: "nearest" })
+      }
+
+      const stopStream = () => {
+        //window.stop();
+        document.getElementById('stream').src = ""
+      }
+
+      const startStream = () => {
+        document.getElementById('stream').src = `${camURLs[0]}:81/stream`
+      }
 
 
 
